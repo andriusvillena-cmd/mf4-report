@@ -176,5 +176,5 @@ def main():
 
     print(f"{archivo}: {len(hallazgos)} hallazgos  ->  {salida}")
 
-
-main()
+if __name__ == "__main__":
+    main()

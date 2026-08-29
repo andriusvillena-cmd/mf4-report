@@ -1,0 +1,4 @@
+asammdf
+matplotlib
+numpy
+pytest

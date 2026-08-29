@@ -1,5 +1,7 @@
 # mf4-report
 
+![tests](https://github.com/andriusvillena-cmd/mf4-report/actions/workflows/tests.yml/badge.svg)
+
 Automated reporting tool for MDF4 vehicle measurement files.
 
 Input: an MDF4 measurement file and a list of signals.

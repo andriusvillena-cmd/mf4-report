@@ -1,4 +1,4 @@
 asammdf
-matplotlib
 numpy
+matplotlib
 pytest

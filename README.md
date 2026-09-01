@@ -5,13 +5,13 @@
 Automated reporting tool for MDF4 vehicle measurement files. Detects signal
 anomalies and produces a self-contained HTML report with plots and statistics.
 
-Built while learning Python for vehicle test data analysis.
-
 ## Usage
 
     python mf4_report.py <measurement.mf4>
 
-Produces `<measurement>_informe.html` next to the input file.
+Produces `<measurement>_report.html` next to the input file.
+`example_report.html` in this repository is the output for
+`run01_braking_splitmu.mf4`.
 
 ## Requirements
 
@@ -50,7 +50,7 @@ that with margin, so the system reaches its safe state before the driver would
 need to intervene.
 
 At a 100 Hz sampling rate, 100 ms equals **10 samples**. This is the origin of
-the `MINIMO_CONGELADAS = 10` constant in `mf4_report.py`.
+the `MIN_FROZEN_SAMPLES = 10` constant in `mf4_report.py`.
 
 ## Functional safety requirements
 
@@ -65,11 +65,11 @@ the `MINIMO_CONGELADAS = 10` constant in `mf4_report.py`.
 
 | Test case | Verifies | Acceptance criterion |
 |---|---|---|
-| `test_detecta_los_tres_fallos_sembrados` | FSR-01.1, FSR-02, FSR-03 | On a reference measurement with three known seeded faults, the detector reports exactly those three: no false negatives, no false positives. |
-| `test_no_dispara_en_ensayos_limpios[run02]` | FSR-01.1, FSR-02, FSR-03 | On a fault-free measurement (dry asphalt), no finding is reported. |
-| `test_no_dispara_en_ensayos_limpios[run03]` | FSR-01.1, FSR-02, FSR-03 | On a fault-free measurement (wet asphalt), no finding is reported. |
-| `test_el_pico_de_presion_esta_en_el_instante_correcto` | FSR-03 | The out-of-range brake pressure event is reported at t = 7.42 s &plusmn; 0.01 s. |
-| `test_la_caida_de_rueda_dura_35_muestras` | FSR-01.1 | The wheel speed dropout is reported as 35 samples, i.e. 350 ms at 100 Hz. |
+| `test_finds_the_three_seeded_faults` | FSR-01.1, FSR-02, FSR-03 | On a reference measurement with three known seeded faults, the detector reports exactly those three: no false negatives, no false positives. |
+| `test_does_not_fire_on_clean_runs[run02]` | FSR-01.1, FSR-02, FSR-03 | On a fault-free measurement (dry asphalt), no finding is reported. |
+| `test_does_not_fire_on_clean_runs[run03]` | FSR-01.1, FSR-02, FSR-03 | On a fault-free measurement (wet asphalt), no finding is reported. |
+| `test_the_pressure_spike_is_at_the_right_instant` | FSR-03 | The out-of-range brake pressure event is reported at t = 7.42 s &plusmn; 0.01 s. |
+| `test_the_wheel_dropout_lasts_35_samples` | FSR-01.1 | The wheel speed dropout is reported as 35 samples, i.e. 350 ms at 100 Hz. |
 
 ## Verification status
 
@@ -81,15 +81,25 @@ clean environment. Current status is shown by the badge at the top of this file.
 | Family | Criterion | Constant |
 |---|---|---|
 | Plausibility | A wheel below 1 km/h while the vehicle reference exceeds 5 km/h is not physically possible. | &mdash; |
-| Liveness | 10 or more consecutive identical samples on an analogue signal. Signals with 10 or fewer distinct values are treated as digital flags and skipped. | `MINIMO_CONGELADAS = 10` |
-| Range | Value outside the declared range plus a tolerance of 2 % of the range width, to avoid firing on sensor noise around rest value. | `TOLERANCIA = 0.02` |
+| Liveness | 10 or more consecutive identical samples on an analogue signal. Signals with 10 or fewer distinct values are treated as digital flags and skipped. | `MIN_FROZEN_SAMPLES = 10` |
+| Range | Value outside the declared range plus a tolerance of 2 % of the range width, to avoid firing on sensor noise around rest value. | `TOLERANCE = 0.02` |
 
 ## Sample data
 
-`run01_frenada_musplit.mf4`, `run02_frenada_asfalto.mf4` and
-`run03_frenada_mojado.mf4` are **synthetic**. They were generated for practice,
+`run01_braking_splitmu.mf4`, `run02_braking_dry.mf4` and
+`run03_braking_wet.mf4` are **synthetic**. They were generated for practice,
 with three faults deliberately seeded in run01, and are not measurements from a
 real vehicle.
 
 They represent emergency braking from 100 to 0 km/h: split-mu (left wheels on
 ice, right on dry asphalt), dry asphalt, and wet asphalt.
+
+---
+
+## Related
+
+[can-physical-decoder](https://github.com/andriusvillena-cmd/can-physical-decoder)
+and
+[flexray-physical-decoder](https://github.com/andriusvillena-cmd/flexray-physical-decoder)
+— decoding CAN and FlexRay frames straight from an oscilloscope trace, with the
+CRCs verified.

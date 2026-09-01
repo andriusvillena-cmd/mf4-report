@@ -1,4 +1,4 @@
-"""mf4-report: informe automatico de un fichero de medida MDF4."""
+"""mf4-report: automated report for an MDF4 vehicle measurement file."""
 
 import base64
 import io
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from asammdf import MDF
 
-RANGOS = {
+RANGES = {
     "Vehicle_Speed":  (0, 300),
     "Wheel_Speed_FL": (0, 300),
     "Wheel_Speed_FR": (0, 300),
@@ -24,97 +24,109 @@ RANGOS = {
     "Lat_Accel":      (-2, 2),
 }
 
-TOLERANCIA = 0.02
-MINIMO_CONGELADAS = 10
+TOLERANCE = 0.02
+MIN_FROZEN_SAMPLES = 10
 
 
-def comprobar_rango(senal, minimo, maximo):
-    margen = (maximo - minimo) * TOLERANCIA
-    fuera = (senal.samples < minimo - margen) | (senal.samples > maximo + margen)
-    if not fuera.any():
+def check_range(signal, low, high):
+    """Values outside the declared range, with a tolerance band for sensor noise."""
+    margin = (high - low) * TOLERANCE
+    outside = (signal.samples < low - margin) | (signal.samples > high + margin)
+
+    if not outside.any():
         return None
+
     return {
-        "tipo": "fuera de rango",
-        "senal": senal.name,
-        "muestras": int(fuera.sum()),
-        "instante": float(senal.timestamps[fuera][0]),
-        "detalle": f"valor {senal.samples[fuera][0]:.1f}, limite [{minimo}, {maximo}]",
+        "type": "out of range",
+        "signal": signal.name,
+        "samples": int(outside.sum()),
+        "time_s": float(signal.timestamps[outside][0]),
+        "detail": f"value {signal.samples[outside][0]:.1f}, limits [{low}, {high}]",
     }
 
 
-def comprobar_congelada(senal):
-    if len(np.unique(senal.samples)) <= 10:
+def check_frozen(signal):
+    """A live analogue sensor always carries noise.
+
+    An exactly repeated value means a dead signal, not a quiet one. Signals with
+    ten or fewer distinct values are treated as digital flags and skipped.
+    """
+    if len(np.unique(signal.samples)) <= 10:
         return None
-    iguales = np.diff(senal.samples) == 0
-    racha = mejor = inicio = 0
-    for i, repetido in enumerate(iguales):
-        if repetido:
-            racha += 1
-            if racha > mejor:
-                mejor, inicio = racha, i - racha + 1
+
+    identical = np.diff(signal.samples) == 0
+    run = longest = start = 0
+
+    for i, repeated in enumerate(identical):
+        if repeated:
+            run += 1
+            if run > longest:
+                longest, start = run, i - run + 1
         else:
-            racha = 0
-    if mejor + 1 < MINIMO_CONGELADAS:
+            run = 0
+
+    if longest + 1 < MIN_FROZEN_SAMPLES:
         return None
+
     return {
-        "tipo": "senal congelada",
-        "senal": senal.name,
-        "muestras": mejor + 1,
-        "instante": float(senal.timestamps[inicio]),
-        "detalle": f"valor {senal.samples[inicio]:.3f} repetido {mejor + 1} veces",
+        "type": "frozen signal",
+        "signal": signal.name,
+        "samples": longest + 1,
+        "time_s": float(signal.timestamps[start]),
+        "detail": f"value {signal.samples[start]:.3f} repeated {longest + 1} times",
     }
 
 
-def estadisticos(senal):
+def statistics(signal):
     return {
-        "senal": senal.name,
-        "unidad": senal.unit or "-",
-        "minimo": float(senal.samples.min()),
-        "maximo": float(senal.samples.max()),
-        "media": float(senal.samples.mean()),
-        "muestras": len(senal.samples),
+        "signal": signal.name,
+        "unit": signal.unit or "-",
+        "min": float(signal.samples.min()),
+        "max": float(signal.samples.max()),
+        "mean": float(signal.samples.mean()),
+        "samples": len(signal.samples),
     }
 
 
-def grafica_en_base64(mdf, nombres):
-    """Dibuja todas las senales y devuelve la imagen como texto para incrustar."""
-    filas = len(nombres)
-    fig, ejes = plt.subplots(filas, 1, figsize=(11, 1.6 * filas), sharex=True)
+def plot_as_base64(mdf, names):
+    """Draw every signal and return the image as text, ready to embed."""
+    rows = len(names)
+    fig, axes = plt.subplots(rows, 1, figsize=(11, 1.6 * rows), sharex=True)
 
-    for eje, nombre in zip(ejes, nombres):
-        senal = mdf.get(nombre)
-        eje.plot(senal.timestamps, senal.samples, linewidth=0.8)
-        eje.set_ylabel(f"{nombre}\n[{senal.unit or '-'}]", fontsize=7)
-        eje.tick_params(labelsize=7)
-        eje.grid(alpha=0.3)
+    for axis, name in zip(axes, names):
+        signal = mdf.get(name)
+        axis.plot(signal.timestamps, signal.samples, linewidth=0.8)
+        axis.set_ylabel(f"{name}\n[{signal.unit or '-'}]", fontsize=7)
+        axis.tick_params(labelsize=7)
+        axis.grid(alpha=0.3)
 
-    ejes[-1].set_xlabel("Tiempo [s]")
+    axes[-1].set_xlabel("Time [s]")
     fig.tight_layout()
 
-    memoria = io.BytesIO()
-    fig.savefig(memoria, format="png", dpi=100)
+    memory = io.BytesIO()
+    fig.savefig(memory, format="png", dpi=100)
     plt.close(fig)
-    return base64.b64encode(memoria.getvalue()).decode("ascii")
+    return base64.b64encode(memory.getvalue()).decode("ascii")
 
 
-def escribir_html(archivo, hallazgos, stats, imagen, salida):
-    filas_hallazgos = "".join(
-        f"<tr><td>{h['tipo']}</td><td>{h['senal']}</td>"
-        f"<td>{h['instante']:.2f}</td><td>{h['muestras']}</td><td>{h['detalle']}</td></tr>"
-        for h in hallazgos
-    ) or "<tr><td colspan='5'>Sin hallazgos. Medida correcta.</td></tr>"
+def write_html(source, findings, stats, image, output):
+    finding_rows = "".join(
+        f"<tr><td>{f['type']}</td><td>{f['signal']}</td>"
+        f"<td>{f['time_s']:.2f}</td><td>{f['samples']}</td><td>{f['detail']}</td></tr>"
+        for f in findings
+    ) or "<tr><td colspan='5'>No findings. Measurement is clean.</td></tr>"
 
-    filas_stats = "".join(
-        f"<tr><td>{s['senal']}</td><td>{s['unidad']}</td><td>{s['minimo']:.2f}</td>"
-        f"<td>{s['maximo']:.2f}</td><td>{s['media']:.2f}</td><td>{s['muestras']}</td></tr>"
+    stat_rows = "".join(
+        f"<tr><td>{s['signal']}</td><td>{s['unit']}</td><td>{s['min']:.2f}</td>"
+        f"<td>{s['max']:.2f}</td><td>{s['mean']:.2f}</td><td>{s['samples']}</td></tr>"
         for s in stats
     )
 
     html = f"""<!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Informe {archivo}</title>
+<title>Report {source}</title>
 <style>
  body {{ font-family: system-ui, sans-serif; margin: 40px auto; max-width: 1000px; color: #1a1a1a; }}
  h1 {{ font-size: 1.5rem; margin-bottom: 4px; }}
@@ -123,58 +135,58 @@ def escribir_html(archivo, hallazgos, stats, imagen, salida):
  table {{ border-collapse: collapse; width: 100%; font-size: .9rem; }}
  th, td {{ border-bottom: 1px solid #ddd; padding: 7px 10px; text-align: left; }}
  th {{ background: #f4f4f4; font-weight: 600; }}
- .aviso {{ color: #b00; font-weight: 600; }}
+ .warn {{ color: #b00; font-weight: 600; }}
  img {{ width: 100%; margin-top: 12px; }}
 </style>
 </head>
 <body>
-<h1>Informe de medida &mdash; {archivo}</h1>
-<p class="meta">Generado el {datetime.now():%d/%m/%Y %H:%M} por mf4-report</p>
+<h1>Measurement report &mdash; {source}</h1>
+<p class="meta">Generated on {datetime.now():%Y-%m-%d %H:%M} by mf4-report</p>
 
-<h2>Hallazgos <span class="aviso">({len(hallazgos)})</span></h2>
+<h2>Findings <span class="warn">({len(findings)})</span></h2>
 <table>
-<tr><th>Tipo</th><th>Senal</th><th>t [s]</th><th>Muestras</th><th>Detalle</th></tr>
-{filas_hallazgos}
+<tr><th>Type</th><th>Signal</th><th>t [s]</th><th>Samples</th><th>Detail</th></tr>
+{finding_rows}
 </table>
 
-<h2>Estadisticos</h2>
+<h2>Statistics</h2>
 <table>
-<tr><th>Senal</th><th>Unidad</th><th>Minimo</th><th>Maximo</th><th>Media</th><th>Muestras</th></tr>
-{filas_stats}
+<tr><th>Signal</th><th>Unit</th><th>Min</th><th>Max</th><th>Mean</th><th>Samples</th></tr>
+{stat_rows}
 </table>
 
-<h2>Senales</h2>
-<img src="data:image/png;base64,{imagen}" alt="Graficas de todas las senales">
+<h2>Signals</h2>
+<img src="data:image/png;base64,{image}" alt="Plots of every signal">
 </body>
 </html>"""
 
-    with open(salida, "w", encoding="utf-8") as f:
+    with open(output, "w", encoding="utf-8") as f:
         f.write(html)
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python mf4_report.py <archivo.mf4>")
+        print("Usage: python mf4_report.py <measurement.mf4>")
         sys.exit(1)
 
-    archivo = sys.argv[1]
-    mdf = MDF(archivo)
+    source = sys.argv[1]
+    mdf = MDF(source)
 
-    hallazgos = []
-    stats = []
+    findings, stats = [], []
 
-    for nombre, (minimo, maximo) in RANGOS.items():
-        senal = mdf.get(nombre)
-        stats.append(estadisticos(senal))
-        for hallazgo in (comprobar_rango(senal, minimo, maximo), comprobar_congelada(senal)):
-            if hallazgo:
-                hallazgos.append(hallazgo)
+    for name, (low, high) in RANGES.items():
+        signal = mdf.get(name)
+        stats.append(statistics(signal))
+        for finding in (check_range(signal, low, high), check_frozen(signal)):
+            if finding:
+                findings.append(finding)
 
-    imagen = grafica_en_base64(mdf, list(RANGOS))
-    salida = archivo.replace(".mf4", "_informe.html")
-    escribir_html(archivo, hallazgos, stats, imagen, salida)
+    image = plot_as_base64(mdf, list(RANGES))
+    output = source.replace(".mf4", "_report.html")
+    write_html(source, findings, stats, image, output)
 
-    print(f"{archivo}: {len(hallazgos)} hallazgos  ->  {salida}")
+    print(f"{source}: {len(findings)} findings  ->  {output}")
+
 
 if __name__ == "__main__":
     main()
